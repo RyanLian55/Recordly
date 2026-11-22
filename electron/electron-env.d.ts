@@ -147,6 +147,7 @@ interface RendererNativeStaticLayoutMetrics extends RendererFfmpegAudioMuxMetric
 interface RendererNativeStaticLayoutProgress {
 	sessionId?: string;
 	backend?: RendererNativeStaticLayoutChunkMetric["backend"];
+	nvidiaCudaFailed?: boolean;
 	stage?: "preparing" | "finalizing";
 	elapsedMs?: number;
 	averageFps?: number;
@@ -245,10 +246,12 @@ interface Window {
 		authStorageSetItem: (key: string, value: string) => Promise<void | false>;
 		authStorageRemoveItem: (key: string) => Promise<void>;
 		hudOverlaySetIgnoreMouse: (ignore: boolean) => void;
+		hudOverlaySetPopoverOpen: (open: boolean) => void;
 		hudOverlaySetSourceSelectionActive: (active: boolean) => void;
 		hudOverlayDrag: (phase: "start" | "move" | "end", screenX: number, screenY: number) => void;
 		hudOverlayHide: () => void;
 		hudOverlayClose: () => void;
+		onHudOverlayRestored: (callback: () => void) => () => void;
 		getEditorMode: () => Promise<boolean>;
 		onEditorModeChanged: (callback: (inEditor: boolean) => void) => () => void;
 		hudOverlayRendererReady: () => void;
@@ -261,11 +264,13 @@ interface Window {
 				bottom: number;
 				shape?: "ellipse";
 			}> | null,
+			recordingShape?: import("./hudOverlayBounds").HudOverlayRegion[],
 		) => void;
 		getHudOverlayCaptureProtection: () => Promise<{ success: boolean; enabled: boolean }>;
 		getHudOverlayMousePassthroughSupported: () => Promise<{
 			success: boolean;
 			supported: boolean;
+			dragX11Window?: boolean;
 		}>;
 		setHudOverlayCaptureProtection: (
 			enabled: boolean,
@@ -278,6 +283,7 @@ interface Window {
 		finishRecordingEditor: (error?: string) => Promise<void>;
 		switchToEditor: () => Promise<void>;
 		openSourceSelector: () => Promise<void>;
+		isWaylandScreenCastMissing: () => Promise<boolean>;
 		selectSource: (source: ProcessedDesktopSource) => Promise<ProcessedDesktopSource>;
 		showSourceHighlight: (source: ProcessedDesktopSource) => Promise<{ success: boolean }>;
 		/** Opens the capture picker on every display and resolves when it closes. */
@@ -372,6 +378,7 @@ interface Window {
 			message?: string;
 			error?: string;
 		}>;
+		beginWindowsRecordingCursorCapture?: () => Promise<void>;
 		startFfmpegRecording: (
 			source: ProcessedDesktopSource,
 		) => Promise<{ success: boolean; path?: string; message?: string; error?: string }>;
@@ -735,12 +742,6 @@ interface Window {
 			prompted: boolean;
 			error?: string;
 		}>;
-		requestAccessibilityPermission: () => Promise<{
-			success: boolean;
-			trusted: boolean;
-			prompted: boolean;
-			error?: string;
-		}>;
 		getScreenRecordingPermissionStatus: () => Promise<{
 			success: boolean;
 			status: string;
@@ -909,6 +910,7 @@ interface Window {
 			options?: {
 				preserveProjectPath?: boolean;
 				hideOverlayCursorByDefault?: boolean;
+				captureSourceKind?: "screen" | "window";
 			},
 		) => Promise<{ success: boolean; webcamPath: string | null }>;
 		setCurrentRecordingSession: (
@@ -917,6 +919,7 @@ interface Window {
 				webcamPath?: string | null;
 				timeOffsetMs?: number;
 				hideOverlayCursorByDefault?: boolean;
+				captureSourceKind?: "screen" | "window";
 			},
 			options?: { preserveProjectPath?: boolean },
 		) => Promise<{ success: boolean }>;
@@ -927,6 +930,7 @@ interface Window {
 				webcamPath?: string | null;
 				timeOffsetMs?: number;
 				hideOverlayCursorByDefault?: boolean;
+				captureSourceKind?: "screen" | "window";
 			};
 		}>;
 		getCurrentVideoPath: () => Promise<{ success: boolean; path?: string }>;
@@ -1038,13 +1042,14 @@ interface Window {
 			error?: string;
 		}>;
 		showRecordingPermissions: () => Promise<void>;
-		onRecordingPermissionsRequested: (callback: () => void) => () => void;
 		showRecordingHud: () => Promise<void>;
 		showOnboardingWindow: (options?: { preview?: boolean }) => Promise<boolean>;
 		replayOnboardingIntro?: () => Promise<boolean>;
 		closeOnboardingWindow: () => Promise<boolean>;
+		resolveStartupOnboarding: (action: "show" | "continue" | "restart") => Promise<boolean>;
 		reportOnboardingIntro: (stage: "ready" | "finished" | "skipped") => void;
 		onOnboardingIntroShown: (callback: () => void) => () => void;
+		onOnboardingSoundtrackStart: (callback: () => void) => () => void;
 		createProjectFile: (
 			data: unknown,
 			thumbnail?: string | null,
@@ -1313,6 +1318,7 @@ interface Window {
 			systemAudioEnabled: boolean;
 			webcamEnabled: boolean;
 			webcamDeviceId?: string;
+			floatingWebcamPreviewVisible: boolean;
 		}>;
 		getRecordingAudioLabConfig: () => Promise<{
 			browserMicrophoneProfile: string;
@@ -1324,6 +1330,7 @@ interface Window {
 			systemAudioEnabled?: boolean;
 			webcamEnabled?: boolean;
 			webcamDeviceId?: string;
+			floatingWebcamPreviewVisible?: boolean;
 		}) => Promise<{ success: boolean; error?: string }>;
 		/** Countdown timer before recording */
 		getCountdownDelay: () => Promise<{ success: boolean; delay: number }>;
@@ -1388,16 +1395,7 @@ interface CursorTelemetryPoint {
 		| "right-click"
 		| "middle-click"
 		| "mouseup";
-	cursorType?:
-		| "arrow"
-		| "text"
-		| "pointer"
-		| "crosshair"
-		| "open-hand"
-		| "closed-hand"
-		| "resize-ew"
-		| "resize-ns"
-		| "not-allowed";
+	cursorType?: import("../src/shared/cursorVisualTypes").CursorVisualType;
 }
 
 interface SystemCursorAsset {

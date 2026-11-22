@@ -1,9 +1,9 @@
-import { translate } from "@/i18n/runtime";
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from "react";
 import { useCallback } from "react";
 import { toast } from "@/components/ui/toast";
 import type { useI18n } from "@/contexts/I18nContext";
 import type { useShortcuts } from "@/contexts/ShortcutsContext";
+import { translate } from "@/i18n/runtime";
 import { useVideoEditorAudio } from "../audio/useVideoEditorAudio";
 import type { useAppearanceState } from "../state/useAppearanceState";
 import type { useTimelineState } from "../state/useTimelineState";
@@ -66,6 +66,7 @@ export function useTimelineEditingController(input: Input) {
 		videoSourcePath: input.videoSourcePath,
 		duration: input.duration,
 		loopCursor: input.appearance.loopCursor,
+		alwaysUsePointerCursor: input.appearance.alwaysUsePointerCursor,
 		timeline,
 	});
 	const projection = useTimelineProjection({
@@ -99,6 +100,8 @@ export function useTimelineEditingController(input: Input) {
 		videoPlaybackRef: input.videoPlaybackRef,
 		timelineRef: input.timelineRef,
 		playSourceAudioPreview: audio.playSourceAudioPreview,
+		clipRegions: timeline.clipRegions,
+		zoomRegions: projection.effectiveZoomRegions,
 		timelinePlayheadTime: projection.timelinePlayheadTime,
 		timelineDuration: projection.timelineDuration,
 	});

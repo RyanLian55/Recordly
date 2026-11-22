@@ -17,6 +17,7 @@ import { SliderControl } from "../SliderControl";
 import {
 	type CropRegion,
 	DEFAULT_AUTO_CAPTION_SETTINGS,
+	DEFAULT_WEBCAM_ROUNDNESS,
 	DEFAULT_WEBCAM_SIZE,
 	type WebcamOverlaySettings,
 } from "../types";
@@ -126,19 +127,33 @@ describe("webcam settings controls", () => {
 		}
 	});
 
-	it("selects a 16:9 rectangle retaining Square roundness, footage and timing", () => {
+	it.each([
+		["rectangle", 35, 16 / 9],
+		["squircle", DEFAULT_WEBCAM_SIZE, 1],
+	] as const)("applies %s preset dimensions and roundness while keeping footage and timing", (shape, height, aspect) => {
 		const onWebcamChange = vi.fn();
-		const tree = webcamView({ onWebcamChange });
+		const tree = webcamView({
+			onWebcamChange,
+			webcam: {
+				...DEFAULT_EDITOR_PREFERENCES.webcam,
+				enabled: true,
+				shape: shape === "rectangle" ? "squircle" : "rectangle",
+				roundness: 100,
+				sourcePath: "/recordings/camera.mp4",
+				timeOffsetMs: 75,
+				visibleRanges: [{ startMs: 100, endMs: 2500 }],
+			},
+		});
 		control(tree, ChoiceGroup, (props) => props["aria-label"] === "Shape").onValueChange?.(
-			"rectangle",
+			shape,
 		);
 		expect(onWebcamChange).toHaveBeenLastCalledWith(
 			expect.objectContaining({
-				shape: "rectangle",
-				roundness: 20,
+				shape,
+				roundness: DEFAULT_WEBCAM_ROUNDNESS,
 				sourcePath: "/recordings/camera.mp4",
-				width: expect.closeTo((DEFAULT_WEBCAM_SIZE * 16) / 9, 4),
-				height: DEFAULT_WEBCAM_SIZE,
+				width: expect.closeTo(height * aspect, 4),
+				height,
 				timeOffsetMs: 75,
 				visibleRanges: [{ startMs: 100, endMs: 2500 }],
 			}),

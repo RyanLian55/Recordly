@@ -4,11 +4,11 @@ import {
 	House,
 	MicrophoneIcon,
 	MicrophoneSlashIcon,
-	MinusIcon,
 	MonitorIcon,
 	SpeakerHighIcon,
 	VideoCameraIcon,
 	VideoCameraSlashIcon,
+	XIcon,
 } from "@/components/ui/icons";
 import { toast } from "@/components/ui/toast";
 import { useScopedT } from "../../contexts/I18nContext";
@@ -20,14 +20,17 @@ import { CountdownDelayIcon } from "./CountdownDelayIcon";
 import { HudInteractionContext } from "./contexts/HudInteractionContext";
 import { FloatingWebcamPreviewView } from "./FloatingWebcamPreviewView";
 import { canToggleFloatingWebcamPreview } from "./floatingWebcamPreview";
-import { getHudInteractiveBounds } from "./hudMousePassthrough";
+import { HudTooltip } from "./HudTooltip";
+import { useCameraPermission } from "./hooks/useCameraPermission";
 import { useHudBarDrag } from "./hooks/useHudBarDrag";
+import { useHudHideAnimation } from "./hooks/useHudHideAnimation";
 import { useHudStateTransition } from "./hooks/useHudStateTransition";
 import { useLaunchHudInteractionState } from "./hooks/useLaunchHudInteractionState";
 import { useLaunchWindowActions } from "./hooks/useLaunchWindowActions";
 import { useLaunchWindowSystemState } from "./hooks/useLaunchWindowSystemState";
 import { useRecordingTimer } from "./hooks/useRecordingTimer";
 import { useWebcamPreviewOverlay } from "./hooks/useWebcamPreviewOverlay";
+import { getHudInteractiveBounds } from "./hudMousePassthrough";
 import styles from "./LaunchWindow.module.css";
 import { MarqueeText } from "./MarqueeText";
 import { CountdownPopover } from "./popovers/CountdownPopover";
@@ -71,6 +74,7 @@ function LaunchWindowContent() {
 		systemAudioEnabled,
 		setSystemAudioEnabled,
 		webcamEnabled,
+		webcamRecordingError,
 		setWebcamEnabled,
 		webcamDeviceId,
 		setWebcamDeviceId,
@@ -82,23 +86,21 @@ function LaunchWindowContent() {
 	const { elapsed, formatTime } = useRecordingTimer(recording, paused);
 	const hudContentRef = useRef<HTMLDivElement>(null);
 	const hudBarRef = useRef<HTMLDivElement>(null);
+	const hideHud = useHudHideAnimation(hudBarRef);
 
 	const { selectedSource, hasSelectedSource, syncSelectedSource } = useLaunchWindowActions();
 
-	const showWebcamControls = webcamEnabled && !recording;
+	const { hudOverlayMousePassthroughSupported, platform, dragX11Window } =
+		useLaunchWindowSystemState(preparePermissions);
+	const webcamPopoverOpen = openId === "webcam";
+	const cameraPermission = useCameraPermission(platform, webcamPopoverOpen, webcamEnabled);
+	const cameraAllowed = cameraPermission === "granted";
+	const showWebcamControls =
+		webcamEnabled && !recording && (cameraAllowed || Boolean(webcamRecordingError));
 	const { devices, selectedDeviceId, setSelectedDeviceId } = useMicrophoneDevices(
 		microphoneEnabled || openId === "mic",
 		microphoneDeviceId,
 	);
-	const {
-		devices: videoDevices,
-		selectedDeviceId: selectedVideoDeviceId,
-		setSelectedDeviceId: setSelectedVideoDeviceId,
-	} = useVideoDevices(webcamEnabled || openId === "webcam", webcamDeviceId);
-
-	const { hudOverlayMousePassthroughSupported, platform } =
-		useLaunchWindowSystemState(preparePermissions);
-
 	useEffect(() => {
 		if (!selectedDeviceId) {
 			return;
@@ -107,20 +109,30 @@ function LaunchWindowContent() {
 		setMicrophoneDeviceId(selectedDeviceId === "default" ? undefined : selectedDeviceId);
 	}, [selectedDeviceId, setMicrophoneDeviceId]);
 
+	const webcamPreview = useWebcamPreviewOverlay({
+		webcamEnabled: webcamEnabled && (cameraAllowed || Boolean(webcamRecordingError)),
+		webcamDeviceId,
+		webcamRecordingError,
+		showWebcamControls,
+		webcamPopoverOpen,
+		hudOverlayMousePassthroughSupported,
+		hudBarRef,
+	});
+	const {
+		devices: videoDevices,
+		selectedDeviceId: selectedVideoDeviceId,
+		setSelectedDeviceId: setSelectedVideoDeviceId,
+	} = useVideoDevices(
+		cameraAllowed && (webcamEnabled || webcamPopoverOpen),
+		webcamDeviceId,
+		webcamPopoverOpen && !webcamPreview.editorMode,
+	);
 	useEffect(() => {
 		if (selectedVideoDeviceId && selectedVideoDeviceId !== "default") {
 			setWebcamDeviceId(selectedVideoDeviceId);
 		}
 	}, [selectedVideoDeviceId, setWebcamDeviceId]);
 
-	const webcamPreview = useWebcamPreviewOverlay({
-		webcamEnabled,
-		webcamDeviceId,
-		showWebcamControls,
-		webcamPopoverOpen: openId === "webcam",
-		hudOverlayMousePassthroughSupported,
-		hudBarRef,
-	});
 	const {
 		webcamPreviewRoundness,
 		webcamPreviewShape,
@@ -156,18 +168,30 @@ function LaunchWindowContent() {
 		hudBarRef,
 		recordingWebcamPreviewContainerRef,
 		docked: showRecordingWebcamPreview,
+		dragX11Window,
 	});
 
+	const useRecordingShape = dragX11Window && (recording || restarting || finalizing);
 	useEffect(() => {
 		const reportInteractiveBounds = () => {
+			const interactiveBounds = getHudInteractiveBounds(document);
+			const recordingShape = useRecordingShape
+				? interactiveBounds.concat(
+						Array.from(document.querySelectorAll('[role="tooltip"]'), (element) => {
+							const { left, top, right, bottom } = element.getBoundingClientRect();
+							return { left, top, right, bottom };
+						}),
+					)
+				: undefined;
 			window.electronAPI?.hudOverlaySetInteractiveBounds?.(
-				getHudInteractiveBounds(document).map((rect) => ({
+				interactiveBounds.map((rect) => ({
 					left: window.screenX + rect.left,
 					top: window.screenY + rect.top,
 					right: window.screenX + rect.right,
 					bottom: window.screenY + rect.bottom,
 					shape: rect.shape,
 				})),
+				recordingShape,
 			);
 		};
 
@@ -190,7 +214,7 @@ function LaunchWindowContent() {
 			window.removeEventListener("resize", reportInteractiveBounds);
 			window.electronAPI?.hudOverlaySetInteractiveBounds?.(null);
 		};
-	}, [recordingWebcamPreviewContainerRef]);
+	}, [useRecordingShape, recordingWebcamPreviewContainerRef]);
 
 	const { handleHudMouseEnter, handleHudMouseLeave, beginInteractiveHudAction } =
 		useLaunchHudInteractionState({
@@ -281,16 +305,17 @@ function LaunchWindowContent() {
 		void window.electronAPI.showProjectDashboard();
 	};
 	const homeButton = (
-		<Button
-			variant="ghost"
-			size="icon"
-			iconSize="lg"
-			aria-label={t("recording.home")}
-			title={t("recording.home")}
-			onClick={openHome}
-		>
-			<House weight="fill" className="size-5" />
-		</Button>
+		<HudTooltip label={t("recording.home")}>
+			<Button
+				variant="ghost"
+				size="icon"
+				iconSize="lg"
+				aria-label={t("recording.home")}
+				onClick={openHome}
+			>
+				<House weight="fill" className="size-5" />
+			</Button>
+		</HudTooltip>
 	);
 
 	const recordingControls = (
@@ -318,24 +343,34 @@ function LaunchWindowContent() {
 				onRecord={hasSelectedSource ? toggleRecording : () => void handlePickOnScreen()}
 				onCancel={() => void cancelPendingStart()}
 			/>
-			<Button
-				variant="ghost"
-				size="lg"
-				className={`${styles.electronNoDrag} ${styles.sourceControl} group gap-2`}
-				title={selectedSource}
-				aria-label={captureT("chooseSource")}
-				disabled={isPickerPending || !sourceReady || recording || finalizing}
-				onClick={() => void handlePickOnScreen()}
+			<HudTooltip
+				label={
+					hasSelectedSource
+						? t("recording.settingValue", "{{setting}}: {{value}}", {
+								setting: captureT("chooseSource"),
+								value: selectedSource,
+							})
+						: captureT("chooseSource")
+				}
 			>
-				<MonitorIcon size={18} className="size-5 shrink-0" />
-				<div className="min-w-0 overflow-hidden">
-					{hasSelectedSource ? (
-						<MarqueeText text={selectedSource} />
-					) : (
-						<span>{captureT("pickSource")}</span>
-					)}
-				</div>
-			</Button>
+				<Button
+					variant="ghost"
+					size="lg"
+					className={`${styles.electronNoDrag} ${styles.sourceControl} group gap-2`}
+					aria-label={captureT("chooseSource")}
+					disabled={isPickerPending || !sourceReady || recording || finalizing}
+					onClick={() => void handlePickOnScreen()}
+				>
+					<MonitorIcon size={18} className="size-5 shrink-0" />
+					<div className="min-w-0 overflow-hidden">
+						{hasSelectedSource ? (
+							<MarqueeText text={selectedSource} />
+						) : (
+							<span>{captureT("pickSource")}</span>
+						)}
+					</div>
+				</Button>
+			</HudTooltip>
 			<span aria-hidden="true" className={styles.sourceDivider} />
 			<MicPopover
 				disabled={recording || countdownActive}
@@ -377,14 +412,17 @@ function LaunchWindowContent() {
 
 			<WebcamPopover
 				disabled={recording || countdownActive}
+				cameraPermission={cameraPermission}
 				webcamEnabled={webcamEnabled}
 				onDisableWebcam={() => setWebcamEnabled(false)}
-				canToggleFloatingPreview={canToggleFloatingWebcamPreview(
-					hudOverlayMousePassthroughSupported,
-				)}
+				canToggleFloatingPreview={
+					cameraAllowed &&
+					canToggleFloatingWebcamPreview(hudOverlayMousePassthroughSupported)
+				}
 				showFloatingWebcamPreview={showFloatingWebcamPreview}
 				onToggleFloatingPreview={() => setShowFloatingWebcamPreview((current) => !current)}
 				showWebcamControls={showWebcamControls && !showRecordingWebcamPreview}
+				previewError={webcamPreview.webcamPreviewError}
 				roundness={webcamPreviewRoundness}
 				shape={webcamPreviewShape}
 				setWebcamPreviewNode={setWebcamPreviewNode}
@@ -427,7 +465,7 @@ function LaunchWindowContent() {
 						size="icon"
 						iconSize="lg"
 						disabled={countdownActive}
-						title={`${t("recording.countdownDelay")}: ${countdownDelay === 0 ? t("recording.noDelay") : `${countdownDelay}s`}`}
+						aria-label={t("recording.countdownDelay")}
 						className={countdownDelay > 0 ? "text-accent" : ""}
 					>
 						<CountdownDelayIcon seconds={countdownDelay} className="size-5" />
@@ -437,21 +475,23 @@ function LaunchWindowContent() {
 
 			<span aria-hidden="true" className={styles.sourceDivider} />
 			{homeButton}
-			<Button
-				variant="ghost"
-				size="icon"
-				iconSize="lg"
-				onClick={() => window.electronAPI?.hudOverlayHide?.()}
-				disabled={countdownActive}
-				title={t("recording.hideHud")}
-			>
-				<MinusIcon className="size-5" />
-			</Button>
+			<HudTooltip label={t("recording.hideHud")}>
+				<Button
+					variant="ghost"
+					size="icon"
+					iconSize="lg"
+					onClick={hideHud}
+					disabled={countdownActive}
+					aria-label={t("recording.hideHud")}
+				>
+					<XIcon className="size-5" />
+				</Button>
+			</HudTooltip>
 		</div>
 	);
 
 	const useNativeHudBarDrag =
-		platform === "linux" || hudOverlayMousePassthroughSupported === false;
+		!dragX11Window && (platform === "linux" || hudOverlayMousePassthroughSupported === false);
 	const finishHudTransition = useHudStateTransition(
 		hudBarRef,
 		finalizing && !restarting ? "finalizing" : recording || restarting ? "recording" : "idle",

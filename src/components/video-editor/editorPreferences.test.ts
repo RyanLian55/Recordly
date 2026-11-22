@@ -4,13 +4,19 @@ import {
 	DEFAULT_EDITOR_PREFERENCES,
 	EDITOR_PREFERENCES_STORAGE_KEY,
 	EDITOR_PRESETS_STORAGE_KEY,
+	getPaddingPreference,
 	loadEditorPreferences,
 	loadEditorPresets,
 	normalizeEditorPreferences,
 	saveEditorPreferences,
 	saveEditorPresets,
 } from "./editorPreferences";
-import { DEFAULT_AUTO_CAPTION_SETTINGS, DEFAULT_CROP_REGION } from "./types";
+import {
+	DEFAULT_AUTO_CAPTION_SETTINGS,
+	DEFAULT_CROP_REGION,
+	DEFAULT_PADDING,
+	DEFAULT_WINDOW_PADDING,
+} from "./types";
 
 describe("border radius preferences", () => {
 	it("migrates legacy pixels once and marks the stored unit", () => {
@@ -28,7 +34,7 @@ describe("border radius preferences", () => {
 			vi.stubGlobal("navigator", { platform: "Win32" });
 			expect(normalizeEditorPreferences({ borderRadius: 0 }).borderRadius).toBe(0);
 			vi.stubGlobal("navigator", { platform: "MacIntel" });
-			expect(normalizeEditorPreferences({ borderRadius: 0 }).borderRadius).toBe(8);
+			expect(normalizeEditorPreferences({ borderRadius: 0 }).borderRadius).toBe(4);
 		} finally {
 			vi.unstubAllGlobals();
 		}
@@ -81,6 +87,85 @@ describe("editorPreferences", () => {
 	afterEach(() => {
 		vi.unstubAllGlobals();
 		Reflect.deleteProperty(globalThis, "electronAPI");
+	});
+
+	it("starts from 2.0 defaults while retaining v1.4 padding for windows and the resource library", () => {
+		const legacyKey = "recordly.editor.preferences";
+		const legacy = {
+			wallpaper: "/wallpapers/tahoe-light.jpg",
+			shadowIntensity: 0.67,
+			exportQuality: "source",
+			padding: 0,
+			customWallpapers: ["/fixtures/background.jpg"],
+			whisperModelPath: "/fixtures/whisper.bin",
+		};
+		const settings = stubElectronSettings({ [legacyKey]: legacy });
+
+		expect(loadEditorPreferences()).toMatchObject({
+			wallpaper: DEFAULT_EDITOR_PREFERENCES.wallpaper,
+			shadowIntensity: DEFAULT_EDITOR_PREFERENCES.shadowIntensity,
+			exportQuality: "medium",
+			advancedExportSettings: false,
+			screenPadding: DEFAULT_PADDING,
+			windowPadding: DEFAULT_PADDING,
+			customWallpapers: legacy.customWallpapers,
+			whisperModelPath: legacy.whisperModelPath,
+		});
+
+		saveEditorPreferences({ shadowIntensity: 0.8 });
+		const saved = {
+			shadowIntensity: 0.8,
+			screenPadding: DEFAULT_PADDING,
+			windowPadding: DEFAULT_PADDING,
+			customWallpapers: legacy.customWallpapers,
+			whisperModelPath: legacy.whisperModelPath,
+		};
+		expect(settings.get(EDITOR_PREFERENCES_STORAGE_KEY)).toMatchObject(saved);
+		expect(loadEditorPreferences()).toMatchObject(saved);
+		expect(settings.get(legacyKey)).toEqual(legacy);
+	});
+
+	it("applies the same upgrade rule to browser-stored v1.4 preferences", () => {
+		vi.stubGlobal(
+			"localStorage",
+			createStorageMock({
+				"recordly.editor.preferences": JSON.stringify({
+					shadowIntensity: 0.67,
+					customWallpapers: ["/fixtures/background.jpg"],
+				}),
+			}),
+		);
+		expect(loadEditorPreferences()).toMatchObject({
+			shadowIntensity: DEFAULT_EDITOR_PREFERENCES.shadowIntensity,
+			customWallpapers: ["/fixtures/background.jpg"],
+		});
+	});
+
+	it("uses valid browser preferences when the native v2 record is invalid", () => {
+		stubElectronSettings({ [EDITOR_PREFERENCES_STORAGE_KEY]: false });
+		vi.stubGlobal(
+			"localStorage",
+			createStorageMock({
+				[EDITOR_PREFERENCES_STORAGE_KEY]: JSON.stringify({ shadowIntensity: 0.8 }),
+			}),
+		);
+		expect(loadEditorPreferences().shadowIntensity).toBe(0.8);
+	});
+
+	it("recovers legacy resources when neither store has a valid v2 record", () => {
+		const legacy = { customWallpapers: ["/fixtures/background.jpg"] };
+		const settings = stubElectronSettings({
+			"recordly.editor.preferences": legacy,
+			[EDITOR_PREFERENCES_STORAGE_KEY]: [],
+		});
+		vi.stubGlobal(
+			"localStorage",
+			createStorageMock({ [EDITOR_PREFERENCES_STORAGE_KEY]: "false" }),
+		);
+		expect(loadEditorPreferences().customWallpapers).toEqual(legacy.customWallpapers);
+
+		settings.set(EDITOR_PREFERENCES_STORAGE_KEY, { customWallpapers: [] });
+		expect(loadEditorPreferences().customWallpapers).toEqual([]);
 	});
 
 	it("defaults automatic zooms on and preserves the saved opt-out", () => {
@@ -361,6 +446,7 @@ describe("editorPreferences", () => {
 			connectedZoomEasing: DEFAULT_EDITOR_PREFERENCES.connectedZoomEasing,
 			showCursor: false,
 			loopCursor: true,
+			alwaysUsePointerCursor: true,
 			cursorStyle: "figma",
 			cursorSize: 3,
 			cursorSmoothing: 1.25,
@@ -369,7 +455,8 @@ describe("editorPreferences", () => {
 			cursorClickBounceDuration: 350,
 			cursorSway: 1.5,
 			borderRadius: 18,
-			padding: { top: 30, right: 30, bottom: 30, left: 30, linked: true },
+			screenPadding: { top: 30, right: 30, bottom: 30, left: 30, linked: true },
+			windowPadding: { top: 40, right: 10, bottom: 10, left: 10, linked: false },
 			aspectRatio: "4:5",
 			exportEncodingMode: "quality",
 			exportBackendPreference: DEFAULT_EDITOR_PREFERENCES.exportBackendPreference,
@@ -394,6 +481,7 @@ describe("editorPreferences", () => {
 			zoomInOverlapMs: 200,
 			showCursor: false,
 			loopCursor: true,
+			alwaysUsePointerCursor: true,
 			cursorStyle: "figma",
 			cursorSize: DEFAULT_EDITOR_PREFERENCES.cursorSize,
 			cursorSmoothing: DEFAULT_EDITOR_PREFERENCES.cursorSmoothing,
@@ -402,7 +490,8 @@ describe("editorPreferences", () => {
 			cursorClickBounceDuration: DEFAULT_EDITOR_PREFERENCES.cursorClickBounceDuration,
 			cursorSway: 1.5,
 			borderRadius: 18,
-			padding: { top: 30, right: 30, bottom: 30, left: 30, linked: true },
+			screenPadding: { top: 30, right: 30, bottom: 30, left: 30, linked: true },
+			windowPadding: { top: 40, right: 10, bottom: 10, left: 10, linked: false },
 			aspectRatio: "4:5",
 			exportEncodingMode: "quality",
 			exportFormat: "gif",
@@ -413,6 +502,41 @@ describe("editorPreferences", () => {
 			customAspectHeight: "5",
 			customWallpapers: ["data:image/jpeg;base64,abc"],
 		});
+	});
+
+	it("starts with zero screen padding and 25% window padding without saved preferences", () => {
+		const prefs = loadEditorPreferences();
+		expect(getPaddingPreference(prefs, "screen")).toEqual(DEFAULT_PADDING);
+		expect(getPaddingPreference(prefs, null)).toEqual(DEFAULT_PADDING);
+		expect(getPaddingPreference(prefs, "window")).toEqual(DEFAULT_WINDOW_PADDING);
+		expect(DEFAULT_PADDING.top).toBe(0);
+		expect(DEFAULT_WINDOW_PADDING.top).toBe(25);
+	});
+
+	it("migrates legacy shared padding to windows only and saves it under the new key", () => {
+		const padding = { top: 30, bottom: 5, left: 15, right: 20, linked: false };
+		const settings = stubElectronSettings({
+			[EDITOR_PREFERENCES_STORAGE_KEY]: { padding },
+		});
+
+		const prefs = loadEditorPreferences();
+		expect(getPaddingPreference(prefs, "screen")).toEqual(DEFAULT_PADDING);
+		expect(getPaddingPreference(prefs, "window")).toEqual(padding);
+
+		saveEditorPreferences({ screenPadding: DEFAULT_WINDOW_PADDING });
+		expect(settings.get(EDITOR_PREFERENCES_STORAGE_KEY)).not.toHaveProperty("padding");
+		expect(loadEditorPreferences()).toMatchObject({
+			screenPadding: DEFAULT_WINDOW_PADDING,
+			windowPadding: padding,
+		});
+	});
+
+	it("prefers an explicitly saved window setting over the legacy shared setting", () => {
+		stubElectronSettings({
+			[EDITOR_PREFERENCES_STORAGE_KEY]: { padding: 40, windowPadding: DEFAULT_PADDING },
+		});
+
+		expect(getPaddingPreference(loadEditorPreferences(), "window")).toEqual(DEFAULT_PADDING);
 	});
 
 	it("saves custom Whisper paths", () => {
@@ -657,17 +781,26 @@ describe("user preferences stay independent from projects and presets", () => {
 });
 
 describe("camera shape preferences", () => {
-	it("adopts circle for new recordings and retains explicit shape choices", () => {
+	it("resets legacy roundness and retains overrides from the current version", () => {
 		expect(normalizeEditorPreferences({}).webcam.shape).toBe("circle");
+		const legacy = normalizeEditorPreferences({
+			webcam: { size: 60, roundness: 100 } as never,
+		});
+		expect(legacy.webcam).toMatchObject({
+			shape: "circle",
+			width: 60,
+			height: 60,
+			roundness: 20,
+			roundnessVersion: 1,
+		});
+		expect(normalizeEditorPreferences(legacy).webcam.roundness).toBe(20);
 		expect(
-			normalizeEditorPreferences({ webcam: { size: 60, roundness: 69 } as never }).webcam,
-		).toMatchObject({ shape: "circle", width: 60, height: 60, roundness: 69 });
+			normalizeEditorPreferences({ webcam: { shape: "squircle", roundness: 100 } }).webcam,
+		).toMatchObject({ shape: "squircle", roundness: 20 });
 		expect(
-			normalizeEditorPreferences({ webcam: { shape: "squircle" } as never }).webcam.shape,
-		).toBe("squircle");
-		expect(
-			normalizeEditorPreferences({ webcam: { shape: "rectangle", roundness: 0 } as never })
-				.webcam,
+			normalizeEditorPreferences({
+				webcam: { shape: "rectangle", roundness: 0, roundnessVersion: 1 },
+			}).webcam,
 		).toMatchObject({ shape: "rectangle", roundness: 0 });
 	});
 });

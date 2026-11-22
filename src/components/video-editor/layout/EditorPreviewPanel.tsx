@@ -1,4 +1,4 @@
-import type { Dispatch, RefObject, SetStateAction } from "react";
+import { type Dispatch, type RefObject, type SetStateAction, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
@@ -20,14 +20,22 @@ import {
 	SpeakerHigh,
 	SpeakerLow,
 	SpeakerX,
+	Trash,
 } from "@/components/ui/icons";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
 import type { useI18n } from "@/contexts/I18nContext";
 import { useI18n as useUiLocale } from "@/contexts/I18nContext";
 import { useShortcuts } from "@/contexts/ShortcutsContext";
-import { formatBinding } from "@/lib/shortcuts";
+import { bindingsEqual, CLEAR_ALL_ZOOMS_SHORTCUT, formatBinding } from "@/lib/shortcuts";
 import type { AspectRatio } from "@/utils/aspectRatioUtils";
 import type { useVideoEditorAudio } from "../audio/useVideoEditorAudio";
 import type { CaptionEditTarget } from "../captionEditing";
@@ -100,6 +108,7 @@ type Props = {
 export function EditorPreviewPanel(props: Props) {
 	const { locale, t: uiText } = useUiLocale();
 	const { shortcuts, isMac } = useShortcuts();
+	const [playbackResolution, setPlaybackResolution] = useState("1");
 	const {
 		t,
 		videoPath,
@@ -136,6 +145,13 @@ export function EditorPreviewPanel(props: Props) {
 		setIsPlaying,
 		setError,
 	} = props;
+	const clearZoomsLabel = t("settings.zoom.clearAllZooms");
+	const clearZoomsTitle = Object.values(shortcuts).some((binding) =>
+		bindingsEqual(binding, CLEAR_ALL_ZOOMS_SHORTCUT),
+	)
+		? clearZoomsLabel
+		: `${clearZoomsLabel} (${formatBinding(CLEAR_ALL_ZOOMS_SHORTCUT, isMac)})`;
+	const playbackResolutionLabel = t("editor.playback.resolution");
 	const currentTimestamp = formatPlaybackTime(projection.timelinePlayheadTime);
 	const durationTimestamp = formatPlaybackTime(projection.timelineDuration);
 	// Reserve label and digit space without changing the inherited UI typography.
@@ -246,6 +262,7 @@ export function EditorPreviewPanel(props: Props) {
 									currentTime={currentTime}
 									isPlaying={isPlaying && !isCropping}
 									previewVolume={previewVolume}
+									previewResolutionScale={Number(playbackResolution) || 1}
 									suspendRendering={suspendRendering || isCropping}
 									appearance={appearance}
 									timeline={timeline}
@@ -360,6 +377,17 @@ export function EditorPreviewPanel(props: Props) {
 					>
 						<MagicWand className="h-4 w-4" />
 					</Button>
+					<Button
+						onClick={() => timelineRef.current?.clearAllZooms()}
+						disabled={timeline.zoomRegions.length === 0}
+						variant="ghost"
+						size="icon"
+						className="h-9 w-9"
+						aria-label={clearZoomsLabel}
+						title={clearZoomsTitle}
+					>
+						<Trash className="h-4 w-4" aria-hidden="true" />
+					</Button>
 				</div>
 
 				<div className="editor-playback-center z-10 flex items-center justify-center">
@@ -376,8 +404,18 @@ export function EditorPreviewPanel(props: Props) {
 							variant="ghost"
 							size="icon"
 							className="h-9 w-9"
-							title={t("editor.playback.skipBack")}
-							onClick={playback.handlePreviewSkipBack}
+							title={`${t("editor.playback.skipBack")} (Home)`}
+							aria-label={t("editor.playback.skipBack")}
+							aria-keyshortcuts="Home"
+							onClick={(event) => {
+								if (event.shiftKey) playback.handleSeek(0);
+								else playback.handlePreviewSkip("backward");
+							}}
+							onKeyDown={(event) => {
+								if (event.key !== "Home") return;
+								event.preventDefault();
+								playback.handleSeek(0);
+							}}
 						>
 							<SkipBack className="h-3.5 w-3.5" weight="fill" />
 						</Button>
@@ -401,7 +439,7 @@ export function EditorPreviewPanel(props: Props) {
 							size="icon"
 							className="h-9 w-9"
 							title={t("editor.playback.skipForward")}
-							onClick={playback.handlePreviewSkipForward}
+							onClick={() => playback.handlePreviewSkip("forward")}
 						>
 							<SkipForward className="h-3.5 w-3.5" weight="fill" />
 						</Button>
@@ -416,7 +454,26 @@ export function EditorPreviewPanel(props: Props) {
 					</div>
 				</div>
 
-				<div className="editor-playback-volume z-10 ml-auto flex items-center">
+				<div className="editor-playback-volume z-10 ml-auto flex items-center gap-1">
+					<div title={playbackResolutionLabel}>
+						<Select
+							aria-label={playbackResolutionLabel}
+							value={playbackResolution}
+							onValueChange={setPlaybackResolution}
+							disabled={!videoPath || isCropping}
+						>
+							<SelectTrigger className="editor-playback-resolution text-xs">
+								<SelectValue className="truncate" />
+							</SelectTrigger>
+							<SelectContent placement="top end" className="min-w-24">
+								<SelectItem value="1">
+									{t("editor.playback.fullResolution")}
+								</SelectItem>
+								<SelectItem value="0.5">1/2</SelectItem>
+								<SelectItem value="0.25">1/4</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
 					<Popover>
 						<PopoverTrigger asChild>
 							<Button

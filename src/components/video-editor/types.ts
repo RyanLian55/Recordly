@@ -1,3 +1,5 @@
+import type { CursorVisualType } from "@/shared/cursorVisualTypes";
+
 export type ZoomDepth = 1 | 2 | 3 | 4 | 5 | 6;
 
 export interface ZoomFocus {
@@ -32,16 +34,7 @@ export interface CursorTelemetryPoint {
 		| "mouseup";
 	/** Button whose down/up transition this sample records. */
 	mouseButton?: 1 | 2 | 3;
-	cursorType?:
-		| "arrow"
-		| "text"
-		| "pointer"
-		| "crosshair"
-		| "open-hand"
-		| "closed-hand"
-		| "resize-ew"
-		| "resize-ns"
-		| "not-allowed";
+	cursorType?: CursorVisualType;
 }
 
 export interface CursorVisualSettings {
@@ -169,8 +162,8 @@ export interface WebcamOverlaySettings {
 	height: number;
 	reactToZoom: boolean;
 	roundness: number;
-	/** Legacy pixel value retained only while loading older projects. */
-	cornerRadius?: number;
+	/** Older saves use the shape preset's roundness on load. */
+	roundnessVersion?: typeof WEBCAM_ROUNDNESS_VERSION;
 	shadow: number;
 	margin: number;
 }
@@ -213,6 +206,7 @@ export const DEFAULT_CONNECTED_ZOOM_EASING: ZoomTransitionEasing = "glide";
 export const DEFAULT_WEBCAM_SIZE = 50;
 export const DEFAULT_WEBCAM_REACT_TO_ZOOM = true;
 export const DEFAULT_WEBCAM_ROUNDNESS = 20;
+export const WEBCAM_ROUNDNESS_VERSION = 1;
 export const DEFAULT_SHADOW_INTENSITY = 0.5;
 export const DEFAULT_WEBCAM_SHADOW = 0.2;
 export const DEFAULT_WEBCAM_MARGIN = 24;
@@ -238,6 +232,7 @@ export const DEFAULT_WEBCAM_OVERLAY: WebcamOverlaySettings = {
 	height: DEFAULT_WEBCAM_SIZE,
 	reactToZoom: DEFAULT_WEBCAM_REACT_TO_ZOOM,
 	roundness: DEFAULT_WEBCAM_ROUNDNESS,
+	roundnessVersion: WEBCAM_ROUNDNESS_VERSION,
 	shadow: DEFAULT_WEBCAM_SHADOW,
 	margin: DEFAULT_WEBCAM_MARGIN,
 };
@@ -573,6 +568,21 @@ export const DEFAULT_PADDING: Padding = {
 	right: 0,
 	linked: true,
 };
+
+/** Window captures look best framed on the wallpaper; screen captures fill the canvas. */
+export const DEFAULT_WINDOW_PADDING: Padding = {
+	top: 25,
+	bottom: 25,
+	left: 25,
+	right: 25,
+	linked: true,
+};
+
+export type CaptureSourceKind = "screen" | "window";
+
+export function getDefaultPaddingForCaptureSource(kind: CaptureSourceKind | null): Padding {
+	return kind === "window" ? DEFAULT_WINDOW_PADDING : DEFAULT_PADDING;
+}
 export type {
 	SourceAudioTrackSetting,
 	SourceAudioTrackSettings,
